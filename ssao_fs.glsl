@@ -1,4 +1,4 @@
-#version 450
+#version 330
 
 in vec4 v_depthCoord;
 in vec3 v_normal;

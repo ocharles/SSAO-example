@@ -15,9 +15,12 @@ import Data.Text (Text, unpack)
 import Data.Traversable
 import Foreign
 import Foreign.C
-import Graphics.GL
+import Graphics.GL.Core33
+import Graphics.GL.Ext.ARB.DirectStateAccess
+import Graphics.GL.Ext.ARB.SeparateShaderObjects
 import Graphics.GL.Ext.KHR.Debug
 import Graphics.GL.Internal.Proc
+import Graphics.GL.Types
 import Linear
 import Text.Printf
 import qualified Data.Text.IO as T
@@ -190,11 +193,8 @@ main =
                               fromIntegral <$> V2 screenWidth screenHeight
                            ,SDL.windowOpenGL =
                               Just (SDL.defaultOpenGL {SDL.glProfile =
-                                                         SDL.Core SDL.Debug 3 2})}
-     r <-
-       SDL.createRenderer win
-                          (-1)
-                          SDL.defaultRenderer
+                                                         SDL.Core SDL.Normal 3 3})}
+     SDL.glCreateContext win >>= SDL.glMakeCurrent win
      installDebugHook
      depthRenderbuffer <-
        newRenderbuffer GL_DEPTH_COMPONENT 1024 1024
