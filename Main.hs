@@ -5,13 +5,11 @@
 module Main where
 
 import Codec.Picture
-import System.Random (randomR, getStdGen)
-import Control.Monad.Trans.State (evalState, state)
-import Data.Distributive (distribute)
-import Control.Lens.Operators ((&), (.~))
-import Data.Attoparsec.Text (parseOnly)
 import Control.Monad
+import Control.Monad.Trans.State (evalState, state)
+import Data.Attoparsec.Text (parseOnly)
 import Data.Foldable
+import Data.Maybe (catMaybes)
 import Data.Monoid
 import Data.Text (Text, unpack)
 import Data.Traversable
@@ -21,26 +19,28 @@ import Graphics.GL.Core33
 import Graphics.GL.Ext.ARB.DirectStateAccess
 import Graphics.GL.Ext.ARB.SeparateShaderObjects
 import Graphics.GL.Ext.KHR.Debug
-import Graphics.GL.Internal.Proc
 import Graphics.GL.Types
-import Linear
+import Linear hiding (basis)
+import System.Random (randomR, getStdGen)
 import Text.Printf
 import qualified Data.Text.IO as T
-import qualified SDL
-import qualified ObjParser as Obj
 import qualified Data.Vector.Storable as SV
-
-create m = alloca (\ptr -> m 1 ptr *> peek ptr)
+import qualified ObjParser as Obj
+import qualified SDL
 
 newtype Texture =
   Texture {textureName :: GLuint}
 
+newTexture2D
+  :: GLsizei -> GLenum -> GLsizei -> GLsizei -> IO Texture
 newTexture2D levels internalFormat width height =
   do name <-
        create (glCreateTextures GL_TEXTURE_2D)
      glTextureStorage2D name levels internalFormat width height
      pure (Texture name)
 
+uploadTexture2D :: (Foldable t,Storable a)
+                => t [a] -> IO Texture
 uploadTexture2D pixels =
   do t <- newTexture2D 1 GL_RGBA32F 4 4
      glPixelStorei GL_UNPACK_LSB_FIRST 0
@@ -63,6 +63,7 @@ uploadTexture2D pixels =
                 castPtr)
      pure t
 
+textureFromBMP :: FilePath -> IO Texture
 textureFromBMP filePath =
   do res <- readImage filePath
      case res of
@@ -90,6 +91,7 @@ textureFromBMP filePath =
 newtype Renderbuffer =
   Renderbuffer {renderbufferName :: GLuint}
 
+newRenderbuffer :: GLenum -> GLsizei -> GLsizei -> IO Renderbuffer
 newRenderbuffer internalFormat width height =
   do name <- create glCreateRenderbuffers
      glNamedRenderbufferStorage name internalFormat width height
@@ -108,6 +110,8 @@ data FramebufferAttachment
   | DepthAttachment
   | StencilAttachment
 
+attachmentForGL :: (Eq a,Num a)
+                => FramebufferAttachment -> a
 attachmentForGL (ColorAttachment n) = GL_COLOR_ATTACHMENT0 + fromIntegral n
 attachmentForGL DepthAttachment = GL_DEPTH_ATTACHMENT
 attachmentForGL StencilAttachment = GL_STENCIL_ATTACHMENT
@@ -155,6 +159,8 @@ data StageSource
   | FragmentShader
   deriving (Show)
 
+glShaderStage :: (Eq a,Num a)
+              => StageSource -> a
 glShaderStage VertexShader = GL_VERTEX_SHADER
 glShaderStage FragmentShader = GL_FRAGMENT_SHADER
 
@@ -197,7 +203,8 @@ newProgram f =
                                        \lenPtr ->
                                          do glGetShaderInfoLog shaderName 1024 lenPtr infoLogPtr
                                             peekCString infoLogPtr >>= putStrLn)
-                        glAttachShader name shaderName))
+                        glAttachShader name shaderName
+                        pure shaderName))
      withCString "a_position"
                  (glBindAttribLocation name attribPosition)
      withCString "a_normal"
@@ -220,8 +227,10 @@ newProgram f =
                     \lenPtr ->
                       do glGetProgramInfoLog name 1024 lenPtr infoLogPtr
                          peekCString infoLogPtr >>= putStrLn)
+     for_ (catMaybes shaders) (glDetachShader name)
      pure (Program name)
 
+screenWidth, screenHeight :: Int
 (screenWidth,screenHeight) = (1024,1024)
 
 main :: IO ()
@@ -373,6 +382,7 @@ data GfxData =
           ,feisarDiffuse :: Texture
           ,win :: SDL.Window}
 
+tick :: GfxData -> Float -> IO ()
 tick gfx@GfxData{..} t =
   do _ <- SDL.pollEvents
      for_ [deferDepth,ssao,ship] $
@@ -438,17 +448,18 @@ tick gfx@GfxData{..} t =
      SDL.glSwapWindow win
      tick gfx (t + 1.0e-2)
 
+newSamplingKernel :: IO [V4 Float]
 newSamplingKernel =
   fmap (evalState (mapM (\i ->
-                           do v3 <-
+                           do v <-
                                 fmap normalize
                                      (V4 <$> state (randomR (-1,1)) <*>
                                       state (randomR (-1,1)) <*>
                                       state (randomR (0,1)) <*>
                                       pure 0)
                               let scale =
-                                    fromIntegral i / fromIntegral (4 * 4) :: V1 Float
-                              pure (v3 ^*
+                                    fromIntegral (i :: Int) / (4 * 4) :: V1 Float
+                              pure (v ^*
                                     case lerp 0.1 1.0 (scale * scale) of
                                       V1 x -> x))
                         [0 .. 4 * 4 + 1]))
@@ -541,10 +552,12 @@ instance Storable Vertex where
             c
   alignment _ = 0
 
+attribPosition, attribNormal, attribUV :: GLuint
 attribPosition = 0
 attribNormal = 1
 attribUV = 2
 
+fromObj :: [Obj.Line] -> IO GLuint
 fromObj objLines =
   do shipVbo <- create glCreateBuffers
      withArray objVertices
@@ -634,3 +647,7 @@ fromObj objLines =
           map fst
               (zip [0 ..]
                    (concat objTriangles))
+
+create :: (Num a,Storable b)
+       => (a -> Ptr b -> IO c) -> IO b
+create m = alloca (\ptr -> m 1 ptr *> peek ptr)
