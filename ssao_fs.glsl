@@ -14,7 +14,7 @@ const int KERNEL_SIZE = 16;
 uniform vec4 uRadius;
 
 void main() {
-  vec2 texCoord = (v_depthCoord.xy / v_depthCoord.w + 1.0f) * 0.5f;
+  vec2 texCoord = v_depthCoord.xy;
 
   vec3 origin = v_position.xyz;
 
@@ -30,11 +30,11 @@ void main() {
   float sampleDepth;
   vec4 offset;
 
-  float depthHere = gl_FragCoord.z / gl_FragCoord.w * 0.5f + 0.5f;
+  float depthHere = gl_FragCoord.z;
 
-  for (int i = 0; i < KERNEL_SIZE; ++i) {
+  for (int i = 0; i < KERNEL_SIZE; i++) {
     float r = 0.5f;
-    vec3 sampleRay = tbn * kernel[i].xyz;
+    vec3 sampleRay = tbn * kernel[int(mod(i,16))].xyz;
     sampleRay = origin + sampleRay * r;
 
     offset = vec4(sampleRay.xyz, 1.0);

@@ -2,7 +2,7 @@
 
 uniform sampler2D uInputTex;
 
-uniform int uBlurSize = 4; // use size of noise texture
+uniform int uBlurSize = 4;
 uniform vec2 basis;
 
 in vec2 v_texCoord;

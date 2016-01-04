@@ -5,7 +5,7 @@ let
   inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, attoparsec, base, distributive, gl, lens
-      , linear, random, sdl2, stdenv, text, transformers
+      , linear, random, sdl2, stdenv, text, transformers, JuicyPixels
       }:
       mkDerivation {
         pname = "ssao-example";
@@ -15,7 +15,7 @@ let
         isExecutable = true;
         executableHaskellDepends = [
           attoparsec base distributive gl lens linear random sdl2 text
-          transformers
+          transformers JuicyPixels
         ];
         homepage = "https://github.com/ocharles/ssao-example";
         description = "A demonstration of screen-space ambient occlusion using OpenGL & Haskell";

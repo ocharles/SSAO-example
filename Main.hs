@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 
 module Main where
 
+import Codec.Picture
 import System.Random (randomR, getStdGen)
 import Control.Monad.Trans.State (evalState, state)
 import Data.Distributive (distribute)
@@ -26,6 +28,7 @@ import Text.Printf
 import qualified Data.Text.IO as T
 import qualified SDL
 import qualified ObjParser as Obj
+import qualified Data.Vector.Storable as SV
 
 create m = alloca (\ptr -> m 1 ptr *> peek ptr)
 
@@ -40,6 +43,14 @@ newTexture2D levels internalFormat width height =
 
 uploadTexture2D pixels =
   do t <- newTexture2D 1 GL_RGBA32F 4 4
+     glPixelStorei GL_UNPACK_LSB_FIRST 0
+     glPixelStorei GL_UNPACK_SWAP_BYTES 0
+     glPixelStorei GL_UNPACK_ROW_LENGTH 0
+     glPixelStorei GL_UNPACK_IMAGE_HEIGHT 0
+     glPixelStorei GL_UNPACK_SKIP_ROWS 0
+     glPixelStorei GL_UNPACK_SKIP_PIXELS 0
+     glPixelStorei GL_UNPACK_SKIP_IMAGES 0
+     glPixelStorei GL_UNPACK_ALIGNMENT 1
      withArray (concat pixels)
                (glTextureSubImage2D (textureName t)
                                     0
@@ -51,6 +62,30 @@ uploadTexture2D pixels =
                                     GL_FLOAT .
                 castPtr)
      pure t
+
+textureFromBMP filePath =
+  do res <- readImage filePath
+     case res of
+       Left e -> error e
+       Right (ImageRGB8 (Image width height pixels)) ->
+         do t <-
+              newTexture2D 1
+                           GL_RGB8
+                           (fromIntegral width)
+                           (fromIntegral height)
+            SV.unsafeWith
+              pixels
+              (glTextureSubImage2D (textureName t)
+                                   0
+                                   0
+                                   0
+                                   (fromIntegral width)
+                                   (fromIntegral height)
+                                   GL_RGB
+                                   GL_UNSIGNED_BYTE .
+               castPtr)
+            return t
+       Right _ -> error "Unknown image type"
 
 newtype Renderbuffer =
   Renderbuffer {renderbufferName :: GLuint}
@@ -196,10 +231,11 @@ main =
                                                          SDL.Core SDL.Normal 3 3})}
      SDL.glCreateContext win >>= SDL.glMakeCurrent win
      installDebugHook
+     feisarDiffuse <- textureFromBMP "feisar.bmp"
      depthRenderbuffer <-
-       newRenderbuffer GL_DEPTH_COMPONENT 1024 1024
+       newRenderbuffer GL_DEPTH_COMPONENT32F 1024 1024
      depthTexture <-
-       newTexture2D 1 GL_R32F 1024 1024
+       newTexture2D 1 GL_DEPTH_COMPONENT32F 1024 1024
      ssaoResult <-
        newTexture2D 1 GL_R32F 1024 1024
      ssaoBlurredIntermediate <-
@@ -209,10 +245,8 @@ main =
      Framebuffer depthFBO <-
        newFramebuffer
          (\case
-            ColorAttachment 0 ->
-              Just (AttachToTexture depthTexture 0)
             DepthAttachment ->
-              Just (AttachToRenderbuffer depthRenderbuffer)
+              Just (AttachToTexture depthTexture 0)
             _ -> Nothing)
      Framebuffer ssaoFBO <-
        newFramebuffer
@@ -270,6 +304,8 @@ main =
                         (glBindAttribLocation program 0)
             withCString "a_normal"
                         (glBindAttribLocation program 1)
+            withCString "a_uv"
+                        (glBindAttribLocation program 2)
             do uView <-
                  withCString "u_view"
                              (glGetUniformLocation program)
@@ -303,6 +339,10 @@ main =
           withCString "rotations"
                       (glGetUniformLocation ssao)
         glProgramUniform1i ssao uRotations 1
+     do uDiffuse <-
+          withCString "diffuseMap"
+                      (glGetUniformLocation ship)
+        glProgramUniform1i ship uDiffuse 1
      rotationTexture <- newRotations >>= uploadTexture2D
      uBlurBasis <-
        withCString "basis"
@@ -311,55 +351,92 @@ main =
        T.readFile "feisar.obj" >>=
        fromObj . either error id . parseOnly Obj.objLines
      glEnable GL_DEPTH_TEST
-     forever (do _ <- SDL.pollEvents
-                 do glBindFramebuffer GL_FRAMEBUFFER depthFBO
-                    glViewport 0 0 1024 1024
-                    glClearColor 0 0 0 1
-                    glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
-                    glUseProgram deferDepth
-                    glBindVertexArray shipVao
-                    glDrawArrays GL_TRIANGLES 0 5048
-                 do glBindFramebuffer GL_FRAMEBUFFER ssaoFBO
-                    glViewport 0 0 1024 1024
-                    glClearColor 1 1 1 1
-                    glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
-                    glUseProgram ssao
-                    glActiveTexture GL_TEXTURE0
-                    glBindTexture GL_TEXTURE_2D
-                                  (textureName depthTexture)
-                    glActiveTexture GL_TEXTURE1
-                    glBindTexture GL_TEXTURE_2D
-                                  (textureName rotationTexture)
-                    glBindVertexArray shipVao
-                    glDrawArrays GL_TRIANGLES 0 5048
-                 for_ [(ssaoBlurFBO1,V2 1 0,ssaoResult)
-                      ,(ssaoBlurFBO2,V2 0 1,ssaoBlurredIntermediate)]
-                      (\(fbo,basis,source) ->
-                         do glBindFramebuffer GL_FRAMEBUFFER fbo
-                            glViewport 0 0 1024 1024
-                            glDisable GL_DEPTH_TEST
-                            glUseProgram blur
-                            with (basis :: V2 Float)
-                                 (glProgramUniform2fv blur uBlurBasis 1 .
-                                  castPtr)
-                            glActiveTexture GL_TEXTURE0
-                            glBindTexture GL_TEXTURE_2D
-                                          (textureName source)
-                            glBindVertexArray shipVao
-                            glDrawArrays GL_TRIANGLES 0 3)
-                 do glBindFramebuffer GL_FRAMEBUFFER 0
-                    glViewport 0 0 1024 1024
-                    glClearColor 1 0.2 0.25 1
-                    glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
-                    glEnable GL_DEPTH_TEST
-                    glUseProgram ship
-                    glActiveTexture GL_TEXTURE0
-                    glBindTexture GL_TEXTURE_2D
-                                  (textureName ssaoBlurred)
-                    glBindVertexArray shipVao
-                    glDrawArrays GL_TRIANGLES 0 5048
-                 SDL.glSwapWindow win)
+     tick GfxData {..} 0
      return ()
+
+data GfxData =
+  GfxData {depthFBO :: GLuint
+          ,ssaoFBO :: GLuint
+          ,deferDepth :: GLuint
+          ,ssao :: GLuint
+          ,ssaoBlurred :: Texture
+          ,ship :: GLuint
+          ,blur :: GLuint
+          ,depthTexture :: Texture
+          ,shipVao :: GLuint
+          ,rotationTexture :: Texture
+          ,ssaoBlurFBO1 :: GLuint
+          ,ssaoResult :: Texture
+          ,ssaoBlurFBO2 :: GLuint
+          ,ssaoBlurredIntermediate :: Texture
+          ,uBlurBasis :: GLint
+          ,feisarDiffuse :: Texture
+          ,win :: SDL.Window}
+
+tick gfx@GfxData{..} t =
+  do _ <- SDL.pollEvents
+     for_ [deferDepth,ssao,ship] $
+       \program ->
+         do uModel <-
+              withCString "u_model"
+                          (glGetUniformLocation program)
+            with (m33_to_m44
+                    (fromQuaternion
+                       (axisAngle (V3 1 0 0)
+                                  (t * 2)) !*!
+                     fromQuaternion (axisAngle (V3 0 1 0) t)) !*!
+                  scaled (V4 0.1 0.1 0.1 1) :: M44 Float)
+                 (glProgramUniformMatrix4fv program uModel 1 GL_TRUE . castPtr)
+     do glBindFramebuffer GL_FRAMEBUFFER depthFBO
+        glViewport 0 0 1024 1024
+        glClearColor 0 0 0 1
+        glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
+        glUseProgram deferDepth
+        glBindVertexArray shipVao
+        glDrawArrays GL_TRIANGLES 0 5048
+     do glBindFramebuffer GL_FRAMEBUFFER ssaoFBO
+        glViewport 0 0 1024 1024
+        glClearColor 1 1 1 1
+        glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
+        glUseProgram ssao
+        glActiveTexture GL_TEXTURE0
+        glBindTexture GL_TEXTURE_2D
+                      (textureName depthTexture)
+        glActiveTexture GL_TEXTURE1
+        glBindTexture GL_TEXTURE_2D
+                      (textureName rotationTexture)
+        glBindVertexArray shipVao
+        glDrawArrays GL_TRIANGLES 0 5048
+     for_ [(ssaoBlurFBO1,V2 1 0,ssaoResult)
+          ,(ssaoBlurFBO2,V2 0 1,ssaoBlurredIntermediate)]
+          (\(fbo,basis,source) ->
+             do glBindFramebuffer GL_FRAMEBUFFER fbo
+                glViewport 0 0 1024 1024
+                glDisable GL_DEPTH_TEST
+                glUseProgram blur
+                with (basis :: V2 Float)
+                     (glProgramUniform2fv blur uBlurBasis 1 . castPtr)
+                glActiveTexture GL_TEXTURE0
+                glBindTexture GL_TEXTURE_2D
+                              (textureName source)
+                glBindVertexArray shipVao
+                glDrawArrays GL_TRIANGLES 0 3)
+     do glBindFramebuffer GL_FRAMEBUFFER 0
+        glViewport 0 0 1024 1024
+        glClearColor 1 0.2 0.25 1
+        glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
+        glEnable GL_DEPTH_TEST
+        glUseProgram ship
+        glActiveTexture GL_TEXTURE0
+        glBindTexture GL_TEXTURE_2D
+                      (textureName ssaoBlurred)
+        glActiveTexture GL_TEXTURE1
+        glBindTexture GL_TEXTURE_2D
+                      (textureName feisarDiffuse)
+        glBindVertexArray shipVao
+        glDrawArrays GL_TRIANGLES 0 5048
+     SDL.glSwapWindow win
+     tick gfx (t + 1.0e-2)
 
 newSamplingKernel =
   fmap (evalState (mapM (\i ->
@@ -374,7 +451,7 @@ newSamplingKernel =
                               pure (v3 ^*
                                     case lerp 0.1 1.0 (scale * scale) of
                                       V1 x -> x))
-                        [0 .. 4 * 4]))
+                        [0 .. 4 * 4 + 1]))
        getStdGen
 
 newRotations :: IO [[V4 Float]]
@@ -444,6 +521,7 @@ data Vertex =
   Vertex (V3 Float)
          (V3 Float)
          (V2 Float)
+  deriving (Show)
 
 instance Storable Vertex where
   sizeOf ~(Vertex a b c) = sizeOf a + sizeOf b + sizeOf c
@@ -477,24 +555,10 @@ fromObj objLines =
      glEnableVertexArrayAttrib shipVao 0
      glEnableVertexArrayAttrib shipVao 1
      glEnableVertexArrayAttrib shipVao 2
-     glVertexArrayVertexBuffer shipVao
-                               0
-                               shipVbo
-                               0
-                               (fromIntegral (sizeOf (undefined :: Vertex)))
+     glVertexArrayVertexBuffer shipVao 0 shipVbo 0 (fromIntegral (sizeOf (undefined :: Vertex)))
      glVertexArrayAttribFormat shipVao 0 3 GL_FLOAT GL_FALSE 0
-     glVertexArrayAttribFormat shipVao
-                               1
-                               3
-                               GL_FLOAT
-                               GL_FALSE
-                               (fromIntegral (sizeOf (0 :: V3 Float)))
-     glVertexArrayAttribFormat shipVao
-                               2
-                               2
-                               GL_FLOAT
-                               GL_FALSE
-                               (fromIntegral (sizeOf (0 :: V3 Float) * 2))
+     glVertexArrayAttribFormat shipVao 1 3 GL_FLOAT GL_FALSE (fromIntegral (sizeOf (0 :: V3 Float)))
+     glVertexArrayAttribFormat shipVao 2 2 GL_FLOAT GL_FALSE (fromIntegral (sizeOf (0 :: V3 Float) * 2))
      glVertexArrayAttribBinding shipVao 0 0
      glVertexArrayAttribBinding shipVao 1 0
      glVertexArrayAttribBinding shipVao 2 0

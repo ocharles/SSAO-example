@@ -2,6 +2,8 @@
 
 varying vec3 v_position;
 
+layout(location = 0) out float fragmentDepth;
+
 void main() {
-  gl_FragColor = vec4(gl_FragCoord.z / gl_FragCoord.w * 0.5 + 0.5);
+  fragmentDepth = gl_FragCoord.z;
 }
