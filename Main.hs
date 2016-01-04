@@ -198,6 +198,12 @@ newProgram f =
                                          do glGetShaderInfoLog shaderName 1024 lenPtr infoLogPtr
                                             peekCString infoLogPtr >>= putStrLn)
                         glAttachShader name shaderName))
+     withCString "a_position"
+                 (glBindAttribLocation name attribPosition)
+     withCString "a_normal"
+                 (glBindAttribLocation name attribNormal)
+     withCString "a_uv"
+                 (glBindAttribLocation name attribUV)
      glLinkProgram name
      compiled <-
        alloca (\ptr ->
@@ -300,18 +306,12 @@ main =
                FragmentShader -> Just shipFS)
      for_ [deferDepth,ssao,ship] $
        \program ->
-         do withCString "a_position"
-                        (glBindAttribLocation program 0)
-            withCString "a_normal"
-                        (glBindAttribLocation program 1)
-            withCString "a_uv"
-                        (glBindAttribLocation program 2)
-            do uView <-
+         do do uView <-
                  withCString "u_view"
                              (glGetUniformLocation program)
-               with (lookAt (V3 0 10 (-30))
+               with (lookAt (V3 0 60 0)
                             (V3 0 0 0)
-                            (V3 0 1 0) :: M44 Float)
+                            (V3 0 0 (-1)) :: M44 Float)
                     (glProgramUniformMatrix4fv program uView 1 GL_TRUE .
                      castPtr)
             do uProj <-
@@ -541,6 +541,10 @@ instance Storable Vertex where
             c
   alignment _ = 0
 
+attribPosition = 0
+attribNormal = 1
+attribUV = 2
+
 fromObj objLines =
   do shipVbo <- create glCreateBuffers
      withArray objVertices
@@ -552,16 +556,29 @@ fromObj objLines =
                     (castPtr ptr)
                     GL_STATIC_DRAW)
      shipVao <- create glCreateVertexArrays
-     glEnableVertexArrayAttrib shipVao 0
-     glEnableVertexArrayAttrib shipVao 1
-     glEnableVertexArrayAttrib shipVao 2
-     glVertexArrayVertexBuffer shipVao 0 shipVbo 0 (fromIntegral (sizeOf (undefined :: Vertex)))
-     glVertexArrayAttribFormat shipVao 0 3 GL_FLOAT GL_FALSE 0
-     glVertexArrayAttribFormat shipVao 1 3 GL_FLOAT GL_FALSE (fromIntegral (sizeOf (0 :: V3 Float)))
-     glVertexArrayAttribFormat shipVao 2 2 GL_FLOAT GL_FALSE (fromIntegral (sizeOf (0 :: V3 Float) * 2))
-     glVertexArrayAttribBinding shipVao 0 0
-     glVertexArrayAttribBinding shipVao 1 0
-     glVertexArrayAttribBinding shipVao 2 0
+     let bindingIndex = 0
+     glVertexArrayVertexBuffer shipVao
+                               bindingIndex
+                               shipVbo
+                               0
+                               (fromIntegral (sizeOf (undefined :: Vertex)))
+     for_ [attribPosition,attribNormal,attribUV]
+          (\attrib ->
+             do glEnableVertexArrayAttrib shipVao attrib
+                glVertexArrayAttribBinding shipVao attrib bindingIndex)
+     glVertexArrayAttribFormat shipVao attribPosition 3 GL_FLOAT GL_FALSE 0
+     glVertexArrayAttribFormat shipVao
+                               attribNormal
+                               3
+                               GL_FLOAT
+                               GL_FALSE
+                               (fromIntegral (sizeOf (0 :: V3 Float)))
+     glVertexArrayAttribFormat shipVao
+                               attribUV
+                               2
+                               GL_FLOAT
+                               GL_FALSE
+                               (fromIntegral (sizeOf (0 :: V3 Float) * 2))
      pure shipVao
   where objPositions =
           concatMap (\case
@@ -594,7 +611,7 @@ fromObj objLines =
                     Just tcIndex ->
                       case objTextureCoordinates !! pred tcIndex of
                         Obj.TextureCoordinate u v _ ->
-                          fmap realToFrac (V2 u v)
+                          fmap realToFrac (V2 u (1 - v))
                     Nothing -> V2 0 0)
         objTriangles =
           concatMap (\case
