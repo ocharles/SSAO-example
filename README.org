@@ -1,0 +1,11 @@
+#+TITLE: An Example of Screen-Space Ambient Occlusion
+
+This repository contains an example of srceen space ambient occlusion using
+OpenGL 4.5 (and in particular, direct state access). The technique is almost
+exactly taken from [[http://john-chapman-graphics.blogspot.co.uk/2013/01/ssao-tutorial.html][John Chapman's superb explanation]]. The code is not
+particularly clean Haskell, but I wanted to avoid any tracks for sake of example
+clarity.
+
+The Feisar spaceship is from Turbo Squid: http://www.turbosquid.com/3d-models/free-wipeout-ship-feisar-3d-model/493665
+
+[[screenshot.png]]
