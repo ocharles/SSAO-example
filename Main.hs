@@ -423,7 +423,7 @@ tick gfx@GfxData{..} t =
                 glDrawArrays GL_TRIANGLES 0 3)
      do glBindFramebuffer GL_FRAMEBUFFER 0
         glViewport 0 0 1024 1024
-        glClearColor 1 0.2 0.25 1
+        glClearColor 0 0 0 1
         glClear (GL_COLOR_BUFFER_BIT .|. GL_DEPTH_BUFFER_BIT)
         glEnable GL_DEPTH_TEST
         glUseProgram ship
