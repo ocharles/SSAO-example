@@ -15,6 +15,6 @@ void main()
 {
 	gl_Position = u_proj * u_view * u_model * vec4(a_position, 1.0);
 	v_depthCoord = gl_Position * 0.5f + 0.5f;
-  v_normal = a_normal;
+  v_normal = (u_view * u_model * vec4(a_normal, 0)).xyz;
   v_position = (u_view * u_model * vec4(a_position, 1.0)).xyz;
 }
