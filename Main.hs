@@ -15,23 +15,29 @@ import Render
 import System.Random (randomR, getStdGen)
 import qualified SDL
 
+data FrameData =
+  FrameData {depthFBO :: Framebuffer
+            ,ssaoFBO :: Framebuffer
+            ,deferDepth :: Program
+            ,ssao :: Program
+            ,ssaoBlurred :: Texture
+            ,ship :: Program
+            ,blur :: Program
+            ,depthTexture :: Texture
+            ,shipVao :: VertexArrayObject
+            ,rotationTexture :: Texture
+            ,ssaoBlurFBO1 :: Framebuffer
+            ,ssaoResult :: Texture
+            ,ssaoBlurFBO2 :: Framebuffer
+            ,ssaoBlurredIntermediate :: Texture
+            ,feisarDiffuse :: Texture}
+
 screenWidth, screenHeight :: Int
 (screenWidth,screenHeight) = (1024,1024)
 
-main :: IO ()
-main =
-  do SDL.initializeAll
-     win <-
-       SDL.createWindow
-         "SSAO Example"
-         SDL.defaultWindow {SDL.windowInitialSize =
-                              fromIntegral <$> V2 screenWidth screenHeight
-                           ,SDL.windowOpenGL =
-                              Just (SDL.defaultOpenGL {SDL.glProfile =
-                                                         SDL.Core SDL.Normal 3 3})}
-     SDL.glCreateContext win >>= SDL.glMakeCurrent win
-     installDebugHook
-     feisarDiffuse <- textureFromBMP "feisar.bmp"
+loadFrameData :: IO FrameData
+loadFrameData =
+  do feisarDiffuse <- textureFromBMP "feisar.bmp"
      depthRenderbuffer <-
        newRenderbuffer GL_DEPTH_COMPONENT32F 1024 1024
      depthTexture <-
@@ -101,30 +107,10 @@ main =
      setUniform textureUnit ship "diffuseMap" 1
      rotationTexture <- newRotations >>= uploadTexture2D
      shipVao <- loadObj "feisar.obj"
-     glEnable GL_DEPTH_TEST
-     tick GfxData {..} 0
-     return ()
+     return FrameData {..}
 
-data GfxData =
-  GfxData {depthFBO :: Framebuffer
-          ,ssaoFBO :: Framebuffer
-          ,deferDepth :: Program
-          ,ssao :: Program
-          ,ssaoBlurred :: Texture
-          ,ship :: Program
-          ,blur :: Program
-          ,depthTexture :: Texture
-          ,shipVao :: VertexArrayObject
-          ,rotationTexture :: Texture
-          ,ssaoBlurFBO1 :: Framebuffer
-          ,ssaoResult :: Texture
-          ,ssaoBlurFBO2 :: Framebuffer
-          ,ssaoBlurredIntermediate :: Texture
-          ,feisarDiffuse :: Texture
-          ,win :: SDL.Window}
-
-tick :: GfxData -> Float -> IO ()
-tick gfx@GfxData{..} t =
+frame :: FrameData -> Float -> IO ()
+frame FrameData{..} t =
   do _ <- SDL.pollEvents
      let modelTransform =
            m33_to_m44
@@ -164,8 +150,6 @@ tick gfx@GfxData{..} t =
                        ,dcUniforms = []
                        ,dcNVertices = 5048
                        ,dcModelTransform = modelTransform}]
-     SDL.glSwapWindow win
-     tick gfx (t + 1.0e-2)
   where fullscreen = (0,0,1024,1024)
         depthPass = Pass depthFBO fullscreen
         ssaoPass = Pass ssaoFBO fullscreen
@@ -173,6 +157,28 @@ tick gfx@GfxData{..} t =
         ssaoBlurPass2 = Pass ssaoBlurFBO2 fullscreen
         forwardPass = Pass (Framebuffer 0) fullscreen
         fullScreenTriangle = shipVao
+
+main :: IO ()
+main =
+  do SDL.initializeAll
+     win <-
+       SDL.createWindow
+         "SSAO Example"
+         SDL.defaultWindow {SDL.windowInitialSize =
+                              fromIntegral <$> V2 screenWidth screenHeight
+                           ,SDL.windowOpenGL =
+                              Just (SDL.defaultOpenGL {SDL.glProfile =
+                                                         SDL.Core SDL.Normal 3 3})}
+     SDL.glCreateContext win >>= SDL.glMakeCurrent win
+     glEnable GL_DEPTH_TEST
+     installDebugHook
+     frameData <- loadFrameData
+     traverse_ (\t ->
+                  do _ <- SDL.pollEvents
+                     frame frameData t
+                     SDL.glSwapWindow win)
+               (iterate (+ 1.0e-2) 0)
+     return ()
 
 newSamplingKernel :: IO [V4 Float]
 newSamplingKernel =
