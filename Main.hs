@@ -16,9 +16,9 @@ import Data.Traversable
 import Foreign
 import Foreign.C
 import Graphics.GL.Core33
-import Graphics.GL.Ext.ARB.DirectStateAccess
-import Graphics.GL.Ext.ARB.SeparateShaderObjects
-import Graphics.GL.Ext.KHR.Debug
+import Graphics.GL.ARB.DirectStateAccess
+import Graphics.GL.ARB.SeparateShaderObjects
+import Graphics.GL.KHR.DebugCore
 import Graphics.GL.Types
 import Linear hiding (basis)
 import System.Random (randomR, getStdGen)
@@ -106,12 +106,11 @@ data AttachTo
   | AttachToRenderbuffer Renderbuffer
 
 data FramebufferAttachment
-  = ColorAttachment GLint
+  = ColorAttachment GLenum
   | DepthAttachment
   | StencilAttachment
 
-attachmentForGL :: (Eq a,Num a)
-                => FramebufferAttachment -> a
+attachmentForGL :: FramebufferAttachment -> GLenum
 attachmentForGL (ColorAttachment n) = GL_COLOR_ATTACHMENT0 + fromIntegral n
 attachmentForGL DepthAttachment = GL_DEPTH_ATTACHMENT
 attachmentForGL StencilAttachment = GL_STENCIL_ATTACHMENT
@@ -125,7 +124,7 @@ newFramebuffer f =
                  glGetIntegerv GL_MAX_COLOR_ATTACHMENTS ptr *> peek ptr)
      for_ (DepthAttachment :
            StencilAttachment :
-           map ColorAttachment [0 .. maxColorAttachments - 1])
+           map ColorAttachment [0 .. fromIntegral maxColorAttachments - 1])
           (\attachment ->
              for_ (f attachment)
                   (\case
@@ -159,8 +158,7 @@ data StageSource
   | FragmentShader
   deriving (Show)
 
-glShaderStage :: (Eq a,Num a)
-              => StageSource -> a
+glShaderStage :: StageSource -> GLenum
 glShaderStage VertexShader = GL_VERTEX_SHADER
 glShaderStage FragmentShader = GL_FRAGMENT_SHADER
 
@@ -189,7 +187,7 @@ newProgram f =
                           alloca (\ptr ->
                                     glGetShaderiv shaderName GL_COMPILE_STATUS ptr *>
                                     peek ptr)
-                        unless (compiled == GL_TRUE)
+                        unless (fromIntegral compiled == GL_TRUE)
                                (do putStrLn ("Shader stage failed to compile: " <>
                                              show stage)
                                    T.putStrLn src
@@ -215,7 +213,7 @@ newProgram f =
      compiled <-
        alloca (\ptr ->
                  glGetProgramiv name GL_LINK_STATUS ptr *> peek ptr)
-     unless (compiled == GL_TRUE)
+     unless (fromIntegral compiled == GL_TRUE)
             (do putStrLn "Program failed to link"
                 logLen <-
                   alloca (\ptr ->
@@ -321,19 +319,19 @@ main =
                with (lookAt (V3 0 60 0)
                             (V3 0 0 0)
                             (V3 0 0 (-1)) :: M44 Float)
-                    (glProgramUniformMatrix4fv program uView 1 GL_TRUE .
+                    (glProgramUniformMatrix4fv program uView 1 (fromIntegral GL_TRUE) .
                      castPtr)
             do uProj <-
                  withCString "u_proj"
                              (glGetUniformLocation program)
                with (perspective 1.047 1 0.1 100 :: M44 Float)
-                    (glProgramUniformMatrix4fv program uProj 1 GL_TRUE .
+                    (glProgramUniformMatrix4fv program uProj 1 (fromIntegral GL_TRUE) .
                      castPtr)
             do uModel <-
                  withCString "u_model"
                              (glGetUniformLocation program)
                with (scaled (V4 0.1 0.1 0.1 1) :: M44 Float)
-                    (glProgramUniformMatrix4fv program uModel 1 GL_TRUE .
+                    (glProgramUniformMatrix4fv program uModel 1 (fromIntegral GL_TRUE) .
                      castPtr)
      do uKernel <-
           withCString "kernel"
@@ -396,7 +394,7 @@ tick gfx@GfxData{..} t =
                                   (t * 2)) !*!
                      fromQuaternion (axisAngle (V3 0 1 0) t)) !*!
                   scaled (V4 0.1 0.1 0.1 1) :: M44 Float)
-                 (glProgramUniformMatrix4fv program uModel 1 GL_TRUE . castPtr)
+                 (glProgramUniformMatrix4fv program uModel 1 (fromIntegral GL_TRUE) . castPtr)
      do glBindFramebuffer GL_FRAMEBUFFER depthFBO
         glViewport 0 0 1024 1024
         glClearColor 0 0 0 1
@@ -481,7 +479,7 @@ newRotations =
 installDebugHook :: IO ()
 installDebugHook
   | gl_KHR_debug =
-    do cb <- mkGLDEBUGPROC glCallback
+    do cb <- makeGLDEBUGPROC glCallback
        glDebugMessageCallback cb nullPtr
        glEnable GL_DEBUG_OUTPUT_SYNCHRONOUS
   | otherwise = return ()
@@ -579,18 +577,18 @@ fromObj objLines =
           (\attrib ->
              do glEnableVertexArrayAttrib shipVao attrib
                 glVertexArrayAttribBinding shipVao attrib bindingIndex)
-     glVertexArrayAttribFormat shipVao attribPosition 3 GL_FLOAT GL_FALSE 0
+     glVertexArrayAttribFormat shipVao attribPosition 3 GL_FLOAT (fromIntegral GL_FALSE) 0
      glVertexArrayAttribFormat shipVao
                                attribNormal
                                3
                                GL_FLOAT
-                               GL_FALSE
+                               (fromIntegral GL_FALSE)
                                (fromIntegral (sizeOf (0 :: V3 Float)))
      glVertexArrayAttribFormat shipVao
                                attribUV
                                2
                                GL_FLOAT
-                               GL_FALSE
+                               (fromIntegral GL_FALSE)
                                (fromIntegral (sizeOf (0 :: V3 Float) * 2))
      pure shipVao
   where objPositions =
