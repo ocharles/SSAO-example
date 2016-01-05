@@ -50,7 +50,7 @@ pass (Pass (Framebuffer fboName) (x,y,w,h)) drawCommands =
   where dispatch DrawCommand{..} =
           do bind' bindVertexArray currentVertexArrayObject dcVertexArrayObject
              bind' bindProgram currentProgram dcProgram
-             Program program <- gets currentProgram
+             program <- gets currentProgram
              liftIO $
                do sequence_ (zipWith (\n (Texture texture) ->
                                         do glActiveTexture (GL_TEXTURE0 + n)
@@ -60,20 +60,12 @@ pass (Pass (Framebuffer fboName) (x,y,w,h)) drawCommands =
                   mapM_ (\(n,v) ->
                            do location <-
                                 withCString n
-                                            (glGetUniformLocation program)
+                                            (glGetUniformLocation (programName program))
                               with v
-                                   (glProgramUniform2fv program location 1 .
+                                   (glProgramUniform2fv (programName program) location 1 .
                                     castPtr))
                         dcUniforms
-                  uModel <-
-                    withCString "u_model"
-                                (glGetUniformLocation program)
-                  with dcModelTransform
-                       (glProgramUniformMatrix4fv program
-                                                  uModel
-                                                  1
-                                                  (fromIntegral GL_TRUE) .
-                        castPtr)
+                  setUniform m44 program "u_model" dcModelTransform
                   glDrawArrays GL_TRIANGLES 0 dcNVertices
         bind' :: Eq a
               => (a -> StateT CurrentState IO ())

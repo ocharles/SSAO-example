@@ -2,19 +2,23 @@
 
 module GLObjects where
 
-import Data.Maybe (catMaybes)
-import Graphics.GL.Core33
-import Graphics.GL.ARB.DirectStateAccess
-import Foreign
-import Data.Foldable
-import Data.Text (Text, unpack)
 import Codec.Picture
-import qualified Data.Vector.Storable as SV
-import Data.Traversable
-import Data.Monoid
 import Control.Monad
-import qualified Data.Text.IO as T
+import Data.Attoparsec.Text (parseOnly)
+import Data.Foldable
+import Data.Maybe (catMaybes)
+import Data.Monoid
+import Data.Text (Text, unpack)
+import Data.Traversable
+import Foreign
 import Foreign.C
+import Graphics.GL.ARB.DirectStateAccess
+import Graphics.GL.ARB.SeparateShaderObjects
+import Graphics.GL.Core33
+import Linear
+import qualified Data.Text.IO as T
+import qualified Data.Vector.Storable as SV
+import qualified ObjParser as Obj
 
 newtype Texture =
   Texture {textureName :: GLuint}
@@ -232,3 +236,173 @@ attribUV = 2
 newtype VertexArrayObject =
   VertexArrayObject {vertexArrayObjectName :: GLuint}
   deriving (Eq, Ord)
+
+newtype UniformSetter a =
+  UniformSetter {setUniform :: Program -> String -> a -> IO ()}
+
+m44 :: UniformSetter (M44 Float)
+m44 =
+  UniformSetter
+    (\(Program p) uniform value ->
+       do uView <-
+            withCString uniform
+                        (glGetUniformLocation p)
+          with value
+               (glProgramUniformMatrix4fv p
+                                          uView
+                                          1
+                                          (fromIntegral GL_TRUE) .
+                castPtr))
+
+v4Array :: UniformSetter [V4 Float]
+v4Array =
+  UniformSetter
+    (\(Program p) uniform value ->
+       do location <-
+            withCString uniform
+                        (glGetUniformLocation p)
+          withArray value
+                    (glProgramUniform4fv p
+                                         location
+                                         (fromIntegral (length value)) .
+                     castPtr))
+
+textureUnit :: UniformSetter GLint
+textureUnit =
+  UniformSetter
+    (\(Program p) uniform value ->
+       do location <-
+            withCString uniform
+                        (glGetUniformLocation p)
+          glProgramUniform1i p location value)
+
+data Vertex =
+  Vertex (V3 Float)
+         (V3 Float)
+         (V2 Float)
+  deriving (Show)
+
+instance Storable Vertex where
+  sizeOf ~(Vertex a b c) = sizeOf a + sizeOf b + sizeOf c
+  peek ptr =
+    do Vertex <$> peek (castPtr ptr) <*>
+         peek (castPtr (ptr `plusPtr`
+                        fromIntegral (sizeOf (undefined :: V3 Float)))) <*>
+         peek (castPtr (ptr `plusPtr`
+                        fromIntegral (sizeOf (undefined :: V3 Float) * 2)))
+  poke ptr (Vertex a b c) =
+    do poke (castPtr ptr) a
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral (sizeOf (undefined :: V3 Float))))
+            b
+       poke (castPtr (ptr `plusPtr`
+                      fromIntegral (sizeOf (undefined :: V3 Float) * 2)))
+            c
+  alignment _ = 0
+
+loadObj :: FilePath -> IO VertexArrayObject
+loadObj objPath =
+  do objLines <-
+       T.readFile objPath >>= pure . either error id . parseOnly Obj.objLines
+     let objPositions =
+           concatMap (\case
+                        Obj.LineVertex lv -> [lv]
+                        _ -> [])
+                     objLines
+         objNormals =
+           concatMap (\case
+                        Obj.LineVertexNormal lv ->
+                          [lv]
+                        _ -> [])
+                     objLines
+         objTextureCoordinates =
+           concatMap (\case
+                        Obj.LineTextureCoordinate tc ->
+                          [tc]
+                        _ -> [])
+                     objLines
+         mkVertex faceVertex =
+           Vertex (case objPositions !! pred (Obj.fvVertex faceVertex) of
+                     Obj.Vertex x y z _ ->
+                       fmap realToFrac (V3 x y z))
+                  (case Obj.fvVertexNormal faceVertex of
+                     Just tcIndex ->
+                       case objNormals !! pred tcIndex of
+                         Obj.Vertex x y z _ ->
+                           fmap realToFrac (V3 x y z)
+                     Nothing -> 0)
+                  (case Obj.fvTextureCoordinate faceVertex of
+                     Just tcIndex ->
+                       case objTextureCoordinates !! pred tcIndex of
+                         Obj.TextureCoordinate u v _ ->
+                           fmap realToFrac (V2 u (1 - v))
+                     Nothing -> V2 0 0)
+         objTriangles =
+           concatMap (\case
+                        tri@[_,_,_] ->
+                          [map mkVertex tri]
+                        [a,b,c,d] ->
+                          [map mkVertex [a,b,c],map mkVertex [a,c,d]]
+                        faces ->
+                          error (show faces)) $
+           concatMap (\case
+                        Obj.LineFace vertices ->
+                          [vertices]
+                        _ -> [])
+                     objLines
+         objVertices =
+           [v | tri <- objTriangles
+              , v <- tri]
+         objIndices :: [Word16]
+         objIndices =
+           map fst
+               (zip [0 ..]
+                    (concat objTriangles))
+     shipVbo <- create glCreateBuffers
+     withArray objVertices
+               (\ptr ->
+                  glNamedBufferData
+                    shipVbo
+                    (fromIntegral
+                       (sizeOf (undefined :: Vertex) * length objVertices))
+                    (castPtr ptr)
+                    GL_STATIC_DRAW)
+     shipVao <- create glCreateVertexArrays
+     let bindingIndex = 0
+     glVertexArrayVertexBuffer shipVao
+                               bindingIndex
+                               shipVbo
+                               0
+                               (fromIntegral (sizeOf (undefined :: Vertex)))
+     for_ [attribPosition,attribNormal,attribUV]
+          (\attrib ->
+             do glEnableVertexArrayAttrib shipVao attrib
+                glVertexArrayAttribBinding shipVao attrib bindingIndex)
+     glVertexArrayAttribFormat shipVao
+                               attribPosition
+                               3
+                               GL_FLOAT
+                               (fromIntegral GL_FALSE)
+                               0
+     glVertexArrayAttribFormat shipVao
+                               attribNormal
+                               3
+                               GL_FLOAT
+                               (fromIntegral GL_FALSE)
+                               (fromIntegral (sizeOf (0 :: V3 Float)))
+     glVertexArrayAttribFormat shipVao
+                               attribUV
+                               2
+                               GL_FLOAT
+                               (fromIntegral GL_FALSE)
+                               (fromIntegral (sizeOf (0 :: V3 Float) * 2))
+     pure (VertexArrayObject shipVao)
+
+loadVertexFragmentProgram :: FilePath -> FilePath -> IO Program
+loadVertexFragmentProgram vs fs =
+  do do depthVS <- T.readFile vs
+        depthFS <- T.readFile fs
+        newProgram
+          (\case
+             VertexShader -> Just depthVS
+             FragmentShader -> Just depthFS)
