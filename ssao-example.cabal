@@ -23,6 +23,7 @@ executable ssao-example
                 sdl2 >=2.1 && <2.2,
                 text >=1.2 && <1.3,
                 attoparsec >=0.13 && <0.14,
+                contravariant,
                 OpenGLRaw >= 3.0.0.0,
                 distributive,
                 vector,

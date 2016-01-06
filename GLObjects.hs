@@ -2,6 +2,8 @@
 
 module GLObjects where
 
+import Data.Functor.Contravariant
+import Data.Functor.Contravariant.Divisible
 import Codec.Picture
 import Control.Monad
 import Data.Attoparsec.Text (parseOnly)
@@ -282,23 +284,11 @@ data Vertex =
          (V2 Float)
   deriving (Show)
 
-instance Storable Vertex where
-  sizeOf ~(Vertex a b c) = sizeOf a + sizeOf b + sizeOf c
-  peek ptr =
-    do Vertex <$> peek (castPtr ptr) <*>
-         peek (castPtr (ptr `plusPtr`
-                        fromIntegral (sizeOf (undefined :: V3 Float)))) <*>
-         peek (castPtr (ptr `plusPtr`
-                        fromIntegral (sizeOf (undefined :: V3 Float) * 2)))
-  poke ptr (Vertex a b c) =
-    do poke (castPtr ptr) a
-       poke (castPtr (ptr `plusPtr`
-                      fromIntegral (sizeOf (undefined :: V3 Float))))
-            b
-       poke (castPtr (ptr `plusPtr`
-                      fromIntegral (sizeOf (undefined :: V3 Float) * 2)))
-            c
-  alignment _ = 0
+objVertexAttribs :: VertexAttrib Vertex
+objVertexAttribs =
+  divide (\(Vertex a b c) -> (a,(b,c)))
+         position
+         (divided normal uv)
 
 loadObj :: FilePath -> IO VertexArrayObject
 loadObj objPath =
@@ -358,45 +348,7 @@ loadObj objPath =
            map fst
                (zip [0 ..]
                     (concat objTriangles))
-     shipVbo <- create glCreateBuffers
-     withArray objVertices
-               (\ptr ->
-                  glNamedBufferData
-                    shipVbo
-                    (fromIntegral
-                       (sizeOf (undefined :: Vertex) * length objVertices))
-                    (castPtr ptr)
-                    GL_STATIC_DRAW)
-     shipVao <- create glCreateVertexArrays
-     let bindingIndex = 0
-     glVertexArrayVertexBuffer shipVao
-                               bindingIndex
-                               shipVbo
-                               0
-                               (fromIntegral (sizeOf (undefined :: Vertex)))
-     for_ [attribPosition,attribNormal,attribUV]
-          (\attrib ->
-             do glEnableVertexArrayAttrib shipVao attrib
-                glVertexArrayAttribBinding shipVao attrib bindingIndex)
-     glVertexArrayAttribFormat shipVao
-                               attribPosition
-                               3
-                               GL_FLOAT
-                               (fromIntegral GL_FALSE)
-                               0
-     glVertexArrayAttribFormat shipVao
-                               attribNormal
-                               3
-                               GL_FLOAT
-                               (fromIntegral GL_FALSE)
-                               (fromIntegral (sizeOf (0 :: V3 Float)))
-     glVertexArrayAttribFormat shipVao
-                               attribUV
-                               2
-                               GL_FLOAT
-                               (fromIntegral GL_FALSE)
-                               (fromIntegral (sizeOf (0 :: V3 Float) * 2))
-     pure (VertexArrayObject shipVao)
+     VertexArrayObject <$> uploadVertices objVertexAttribs objVertices
 
 loadVertexFragmentProgram :: FilePath -> FilePath -> IO Program
 loadVertexFragmentProgram vs fs =
@@ -406,3 +358,107 @@ loadVertexFragmentProgram vs fs =
           (\case
              VertexShader -> Just depthVS
              FragmentShader -> Just depthFS)
+
+data Attribute = Position | Normal | UV
+
+data VertexAttrib a =
+  VertexAttrib {vertexAttribSize :: GLuint
+               ,vertexAttribPoke :: Ptr a -> a -> IO ()
+               ,vertexAttribFormat :: [(Attribute,GLint,GLenum,GLenum,GLuint)]}
+
+instance Contravariant VertexAttrib where
+  contramap f (VertexAttrib sz poke_ fmt) =
+    VertexAttrib
+      sz
+      (\ptr v ->
+         poke_ (castPtr ptr)
+               (f v))
+      fmt
+
+instance Divisible VertexAttrib where
+  conquer =
+    VertexAttrib 0
+                 (\_ _ -> return ())
+                 []
+  divide f fb fc =
+    VertexAttrib {vertexAttribSize = vertexAttribSize fb + vertexAttribSize fc
+                 ,vertexAttribPoke =
+                    \ptr a ->
+                      do let (b,c) = f a
+                         vertexAttribPoke fb
+                                          (castPtr ptr)
+                                          b
+                         vertexAttribPoke
+                           fc
+                           (castPtr ptr `plusPtr`
+                            fromIntegral (vertexAttribSize fb))
+                           c
+                 ,vertexAttribFormat =
+                    vertexAttribFormat fb <>
+                    (map (\(a,b,c,d,e) ->
+                            (a,b,c,d,e + vertexAttribSize fb))
+                         (vertexAttribFormat fc))}
+
+position :: VertexAttrib (V3 Float)
+position =
+  VertexAttrib {vertexAttribSize =
+                  fromIntegral (sizeOf (0 :: V3 Float))
+               ,vertexAttribPoke = poke
+               ,vertexAttribFormat =
+                  [(Position,3,GL_FLOAT,GL_FALSE,0)]}
+
+normal :: VertexAttrib (V3 Float)
+normal =
+  VertexAttrib {vertexAttribSize =
+                  fromIntegral (sizeOf (0 :: V3 Float))
+               ,vertexAttribPoke = poke
+               ,vertexAttribFormat =
+                  [(Normal,3,GL_FLOAT,GL_FALSE,0)]}
+
+uv :: VertexAttrib (V2 Float)
+uv =
+  VertexAttrib {vertexAttribSize =
+                  fromIntegral (sizeOf (0 :: V2 Float))
+               ,vertexAttribPoke = poke
+               ,vertexAttribFormat =
+                  [(UV,2,GL_FLOAT,GL_FALSE,0)]}
+
+uploadVertices :: VertexAttrib v -> [v] -> IO GLuint
+uploadVertices attribs dat =
+  do let sizeInBytes = fromIntegral (vertexAttribSize attribs) * length dat
+     buffer <- mallocBytes sizeInBytes
+     sequence_ (zipWith (\v offset ->
+                           vertexAttribPoke
+                             attribs
+                             (buffer `plusPtr` fromIntegral offset)
+                             v)
+                        dat
+                        (iterate (+ vertexAttribSize attribs) 0))
+     vbo <- create glCreateBuffers
+     glNamedBufferData vbo
+                       (fromIntegral sizeInBytes)
+                       buffer
+                       GL_STATIC_DRAW
+     vao <- create glCreateVertexArrays
+     let bindingIndex = 0
+     glVertexArrayVertexBuffer vao
+                               bindingIndex
+                               vbo
+                               0
+                               (fromIntegral (vertexAttribSize attribs))
+     for_ (vertexAttribFormat attribs)
+          (\(attribTy,components,compTy,normalized,offset) ->
+             do let attribIndex =
+                      case attribTy of
+                        Position -> attribPosition
+                        Normal -> attribNormal
+                        UV -> attribUV
+                glEnableVertexArrayAttrib vao attribIndex
+                glVertexArrayAttribBinding vao attribIndex bindingIndex
+                glVertexArrayAttribFormat vao
+                                          attribIndex
+                                          components
+                                          compTy
+                                          (fromIntegral normalized)
+                                          offset)
+     pure vbo
