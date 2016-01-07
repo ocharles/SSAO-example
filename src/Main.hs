@@ -14,6 +14,7 @@ import Linear hiding (basis)
 import Render
 import System.Random (randomR, getStdGen)
 import qualified SDL
+import Paths_ssao_example
 
 data FrameData =
   FrameData {depthFBO :: Framebuffer
@@ -37,30 +38,23 @@ screenWidth, screenHeight :: Int
 
 loadFrameData :: IO FrameData
 loadFrameData =
-  do feisarDiffuse <- textureFromBMP "feisar.bmp"
-     depthRenderbuffer <-
-       newRenderbuffer GL_DEPTH_COMPONENT32F 1024 1024
-     depthTexture <-
-       newTexture2D 1 GL_DEPTH_COMPONENT32F 1024 1024
-     ssaoResult <-
-       newTexture2D 1 GL_R32F 1024 1024
-     ssaoBlurredIntermediate <-
-       newTexture2D 1 GL_R32F 1024 1024
-     ssaoBlurred <-
-       newTexture2D 1 GL_R32F 1024 1024
+  do feisarDiffuse <-
+       textureFromBMP =<< getDataFileName "resources/textures/feisar.bmp"
+     depthRenderbuffer <- newRenderbuffer GL_DEPTH_COMPONENT32F 1024 1024
+     depthTexture <- newTexture2D 1 GL_DEPTH_COMPONENT32F 1024 1024
+     ssaoResult <- newTexture2D 1 GL_R32F 1024 1024
+     ssaoBlurredIntermediate <- newTexture2D 1 GL_R32F 1024 1024
+     ssaoBlurred <- newTexture2D 1 GL_R32F 1024 1024
      depthFBO <-
        newFramebuffer
          (\case
-            DepthAttachment ->
-              Just (AttachToTexture depthTexture 0)
+            DepthAttachment -> Just (AttachToTexture depthTexture 0)
             _ -> Nothing)
      ssaoFBO <-
        newFramebuffer
          (\case
-            ColorAttachment 0 ->
-              Just (AttachToTexture ssaoResult 0)
-            DepthAttachment ->
-              Just (AttachToRenderbuffer depthRenderbuffer)
+            ColorAttachment 0 -> Just (AttachToTexture ssaoResult 0)
+            DepthAttachment -> Just (AttachToRenderbuffer depthRenderbuffer)
             _ -> Nothing)
      ssaoBlurFBO1 <-
        newFramebuffer
@@ -72,18 +66,25 @@ loadFrameData =
      ssaoBlurFBO2 <-
        newFramebuffer
          (\case
-            ColorAttachment 0 ->
-              Just (AttachToTexture ssaoBlurred 0)
+            ColorAttachment 0 -> Just (AttachToTexture ssaoBlurred 0)
             DepthAttachment -> Nothing
             _ -> Nothing)
      deferDepth <-
-       loadVertexFragmentProgram "depth_vs.glsl" "depth_fs.glsl"
+       join (loadVertexFragmentProgram <$>
+             getDataFileName "resources/shaders/depth_vs.glsl" <*>
+             getDataFileName "resources/shaders/depth_fs.glsl")
      ssao <-
-       loadVertexFragmentProgram "ssao_vs.glsl" "ssao_fs.glsl"
+       join (loadVertexFragmentProgram <$>
+             getDataFileName "resources/shaders/ssao_vs.glsl" <*>
+             getDataFileName "resources/shaders/ssao_fs.glsl")
      blur <-
-       loadVertexFragmentProgram "blur_vs.glsl" "blur_fs.glsl"
+       join (loadVertexFragmentProgram <$>
+             getDataFileName "resources/shaders/blur_vs.glsl" <*>
+             getDataFileName "resources/shaders/blur_fs.glsl")
      ship <-
-       loadVertexFragmentProgram "ship_vs.glsl" "ship_fs.glsl"
+       join (loadVertexFragmentProgram <$>
+             getDataFileName "resources/shaders/ship_vs.glsl" <*>
+             getDataFileName "resources/shaders/ship_fs.glsl")
      for_ [deferDepth,ssao,ship] $
        \program ->
          do setUniform
@@ -106,7 +107,7 @@ loadFrameData =
      setUniform textureUnit ssao "rotations" 1
      setUniform textureUnit ship "diffuseMap" 1
      rotationTexture <- newRotations >>= uploadTexture2D
-     shipVao <- loadObj "feisar.obj"
+     shipVao <- loadObj =<< getDataFileName "resources/objects/feisar.obj"
      return FrameData {..}
 
 frame :: FrameData -> Float -> IO ()

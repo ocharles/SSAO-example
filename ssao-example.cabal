@@ -10,6 +10,10 @@ category:            Game
 build-type:          Simple
 extra-source-files:  README.org
 cabal-version:       >=1.10
+data-files:
+           resources/shaders/*.glsl
+           resources/objects/*.obj
+           resources/textures/*.bmp
 
 executable ssao-example
   main-is:             Main.hs
@@ -30,3 +34,4 @@ executable ssao-example
                 JuicyPixels
   default-language:    Haskell2010
   ghc-options: -O2 -Wall
+  hs-source-dirs: src
