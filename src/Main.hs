@@ -172,6 +172,7 @@ main =
                                                          SDL.Core SDL.Normal 3 3})}
      SDL.glCreateContext win >>= SDL.glMakeCurrent win
      glEnable GL_DEPTH_TEST
+     glEnable GL_CULL_FACE
      installDebugHook
      frameData <- loadFrameData
      traverse_ (\t ->
