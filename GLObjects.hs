@@ -6,7 +6,6 @@ import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible
 import Codec.Picture
 import Control.Monad
-import Data.Attoparsec.Text (parseOnly)
 import Data.Foldable
 import Data.Maybe (catMaybes)
 import Data.Monoid
@@ -19,8 +18,9 @@ import Graphics.GL.ARB.SeparateShaderObjects
 import Graphics.GL.Core33
 import Linear
 import qualified Data.Text.IO as T
+import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
-import qualified ObjParser as Obj
+import qualified Codec.Wavefront as Wavefront
 
 newtype Texture =
   Texture {textureName :: GLuint}
@@ -292,54 +292,31 @@ objVertexAttribs =
 
 loadObj :: FilePath -> IO VertexArrayObject
 loadObj objPath =
-  do objLines <-
-       T.readFile objPath >>= pure . either error id . parseOnly Obj.objLines
-     let objPositions =
-           concatMap (\case
-                        Obj.LineVertex lv -> [lv]
-                        _ -> [])
-                     objLines
-         objNormals =
-           concatMap (\case
-                        Obj.LineVertexNormal lv ->
-                          [lv]
-                        _ -> [])
-                     objLines
-         objTextureCoordinates =
-           concatMap (\case
-                        Obj.LineTextureCoordinate tc ->
-                          [tc]
-                        _ -> [])
-                     objLines
-         mkVertex faceVertex =
-           Vertex (case objPositions !! pred (Obj.fvVertex faceVertex) of
-                     Obj.Vertex x y z _ ->
-                       fmap realToFrac (V3 x y z))
-                  (case Obj.fvVertexNormal faceVertex of
-                     Just tcIndex ->
-                       case objNormals !! pred tcIndex of
-                         Obj.Vertex x y z _ ->
-                           fmap realToFrac (V3 x y z)
+  do obj <-
+       fmap (either error id)
+            (Wavefront.fromFile objPath)
+     let mkVertex fi =
+           Vertex (case Wavefront.objLocations obj V.!
+                        pred (Wavefront.faceLocIndex fi) of
+                     Wavefront.Location x y z _ -> fmap realToFrac (V3 x y z))
+                  (case Wavefront.faceNorIndex fi of
+                     Just i ->
+                       case Wavefront.objNormals obj V.! pred i of
+                         Wavefront.Normal x y z -> fmap realToFrac (V3 x y z)
                      Nothing -> 0)
-                  (case Obj.fvTextureCoordinate faceVertex of
-                     Just tcIndex ->
-                       case objTextureCoordinates !! pred tcIndex of
-                         Obj.TextureCoordinate u v _ ->
+                  (case Wavefront.faceTexCoordIndex fi of
+                     Just i ->
+                       case Wavefront.objTexCoords obj V.! pred i of
+                         Wavefront.TexCoord u v _ ->
                            fmap realToFrac (V2 u (1 - v))
-                     Nothing -> V2 0 0)
+                     Nothing -> 0)
          objTriangles =
            concatMap (\case
-                        tri@[_,_,_] ->
-                          [map mkVertex tri]
-                        [a,b,c,d] ->
+                        Wavefront.Triangle a b c -> [map mkVertex [a,b,c]]
+                        Wavefront.Quad a b c d ->
                           [map mkVertex [a,b,c],map mkVertex [a,c,d]]
-                        faces ->
-                          error (show faces)) $
-           concatMap (\case
-                        Obj.LineFace vertices ->
-                          [vertices]
-                        _ -> [])
-                     objLines
+                        faces -> error (show faces)) $
+           (fmap Wavefront.elValue (Wavefront.objFaces obj))
          objVertices =
            [v | tri <- objTriangles
               , v <- tri]

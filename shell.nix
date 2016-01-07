@@ -6,6 +6,7 @@ let
 
   f = { mkDerivation, attoparsec, base, distributive, OpenGLRaw, lens
       , linear, random, sdl2, stdenv, text, transformers, JuicyPixels
+      , wavefront
       }:
       mkDerivation {
         pname = "ssao-example";
@@ -14,8 +15,8 @@ let
         isLibrary = false;
         isExecutable = true;
         executableHaskellDepends = [
-          attoparsec base distributive OpenGLRaw lens linear random sdl2 text
-          transformers JuicyPixels
+          base distributive OpenGLRaw lens linear random sdl2 text
+          transformers JuicyPixels wavefront
         ];
         homepage = "https://github.com/ocharles/ssao-example";
         description = "A demonstration of screen-space ambient occlusion using OpenGL & Haskell";
@@ -68,8 +69,23 @@ let
           license = stdenv.lib.licenses.bsd3;
           hydraPlatforms = stdenv.lib.platforms.none;
         }) {inherit (pkgs) freeglut; inherit (pkgs) mesa;};
-      };
-  }).callPackage f {};
+
+      wavefront = self.callPackage
+        ({ mkDerivation, attoparsec, base, dlist, filepath, mtl, text
+         , transformers, vector
+         }:
+         mkDerivation {
+           pname = "wavefront";
+           version = "0.6";
+           sha256 = "1v4r26zv79cgq7324wys6dm6qj2w8wskfk8i930i52kvggigsasp";
+           libraryHaskellDepends = [
+             attoparsec base dlist filepath mtl text transformers vector
+           ];
+           homepage = "https://github.com/phaazon/wavefront";
+           description = "Wavefront OBJ loader";
+           license = stdenv.lib.licenses.bsd3;
+         }) {};
+    };}).callPackage f {};
 
 in
 
