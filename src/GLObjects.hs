@@ -2,11 +2,13 @@
 
 module GLObjects where
 
+import Codec.Picture
+import Control.Arrow
+import Control.Monad
+import Control.Monad.Trans.State.Strict (State, runState, gets, modify)
+import Data.Foldable
 import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible
-import Codec.Picture
-import Control.Monad
-import Data.Foldable
 import Data.Maybe (catMaybes)
 import Data.Monoid
 import Data.Text (Text, unpack)
@@ -17,10 +19,11 @@ import Graphics.GL.ARB.DirectStateAccess
 import Graphics.GL.ARB.SeparateShaderObjects
 import Graphics.GL.Core33
 import Linear
+import qualified Codec.Wavefront as Wavefront
+import qualified Data.Map.Strict as Map
 import qualified Data.Text.IO as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
-import qualified Codec.Wavefront as Wavefront
 
 newtype Texture =
   Texture {textureName :: GLuint}
@@ -282,7 +285,7 @@ data Vertex =
   Vertex (V3 Float)
          (V3 Float)
          (V2 Float)
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 objVertexAttribs :: VertexAttrib Vertex
 objVertexAttribs =
@@ -320,11 +323,6 @@ loadObj objPath =
          objVertices =
            [v | tri <- objTriangles
               , v <- tri]
-         objIndices :: [Word16]
-         objIndices =
-           map fst
-               (zip [0 ..]
-                    (concat objTriangles))
      VertexArrayObject <$> uploadVertices objVertexAttribs objVertices
 
 loadVertexFragmentProgram :: FilePath -> FilePath -> IO Program
@@ -400,16 +398,19 @@ uv =
                ,vertexAttribFormat =
                   [(UV,2,GL_FLOAT,GL_FALSE,0)]}
 
-uploadVertices :: VertexAttrib v -> [v] -> IO GLuint
+uploadVertices
+  :: Ord v
+  => VertexAttrib v -> [v] -> IO GLuint
 uploadVertices attribs dat =
-  do let sizeInBytes = fromIntegral (vertexAttribSize attribs) * length dat
+  do let sizeInBytes =
+           fromIntegral (vertexAttribSize attribs) * length vertices
      buffer <- mallocBytes sizeInBytes
      sequence_ (zipWith (\v offset ->
                            vertexAttribPoke
                              attribs
                              (buffer `plusPtr` fromIntegral offset)
                              v)
-                        dat
+                        vertices
                         (iterate (+ vertexAttribSize attribs) 0))
      vbo <- create glCreateBuffers
      glNamedBufferData vbo
@@ -438,4 +439,30 @@ uploadVertices attribs dat =
                                           compTy
                                           (fromIntegral normalized)
                                           offset)
+     ebo <- create glCreateBuffers
+     withArray indices
+               (\ptr ->
+                  glNamedBufferData
+                    ebo
+                    (fromIntegral (length indices * sizeOf (0 :: GLuint)))
+                    ptr
+                    GL_STATIC_DRAW)
+     glVertexArrayElementBuffer vao ebo
      pure vbo
+  where (indices,vertices) =
+          let (indices,(_,vertices)) =
+                runState (traverse dedupVertex dat)
+                         (mempty,mempty)
+          in (indices,V.toList vertices)
+        dedupVertex
+          :: Ord v
+          => v -> State (Map.Map v GLuint,V.Vector v) GLuint
+        dedupVertex v =
+          do vertices <- gets fst
+             case Map.lookup v vertices of
+               Just index -> pure index
+               Nothing ->
+                 do let i =
+                          fromIntegral (Map.size vertices)
+                    modify (Map.insert v i *** flip V.snoc v)
+                    pure i

@@ -20,10 +20,7 @@ data DrawCommand =
               ,dcTextures :: [Texture]
               ,dcModelTransform :: M44 Float
               ,dcUniforms :: [(String,V2 Float)]
-              ,dcNVertices :: GLint}
-  -- ,dcModelView :: M44 Float
-  -- ,dcModelProjection :: M44 Float
-  -- ,dcDrawVertices :: Int}
+              ,dcNElements :: GLint}
   deriving (Eq,Ord)
 
 data Pass =
@@ -66,7 +63,7 @@ pass (Pass (Framebuffer fboName) (x,y,w,h)) drawCommands =
                                     castPtr))
                         dcUniforms
                   setUniform m44 program "u_model" dcModelTransform
-                  glDrawArrays GL_TRIANGLES 0 dcNVertices
+                  glDrawElements GL_TRIANGLES dcNElements GL_UNSIGNED_INT nullPtr
         bind' :: Eq a
               => (a -> StateT CurrentState IO ())
               -> (CurrentState -> a)

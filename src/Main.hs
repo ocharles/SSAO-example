@@ -125,14 +125,14 @@ frame FrameData{..} t =
                        ,dcProgram = deferDepth
                        ,dcTextures = []
                        ,dcModelTransform = modelTransform
-                       ,dcNVertices = 5048
+                       ,dcNElements = 5048
                        ,dcUniforms = []}]
      pass ssaoPass
           [DrawCommand {dcVertexArrayObject = shipVao
                        ,dcProgram = ssao
                        ,dcTextures = [depthTexture,rotationTexture]
                        ,dcModelTransform = modelTransform
-                       ,dcNVertices = 5048
+                       ,dcNElements = 5048
                        ,dcUniforms = []}]
      for_ [(ssaoBlurPass1,V2 1 0,ssaoResult)
           ,(ssaoBlurPass2,V2 0 1,ssaoBlurredIntermediate)]
@@ -142,14 +142,14 @@ frame FrameData{..} t =
                                ,dcProgram = blur
                                ,dcTextures = [source]
                                ,dcModelTransform = identity
-                               ,dcNVertices = 3
+                               ,dcNElements = 3
                                ,dcUniforms = [("basis",basis)]}])
      pass forwardPass
           [DrawCommand {dcVertexArrayObject = shipVao
                        ,dcProgram = ship
                        ,dcTextures = [ssaoBlurred,feisarDiffuse]
                        ,dcUniforms = []
-                       ,dcNVertices = 5048
+                       ,dcNElements = 5048
                        ,dcModelTransform = modelTransform}]
   where fullscreen = (0,0,1024,1024)
         depthPass = Pass depthFBO fullscreen
