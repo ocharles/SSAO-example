@@ -35,6 +35,7 @@ data FrameData =
             ,ssaoBlurFBO2 :: Framebuffer
             ,ssaoBlurredIntermediate :: Texture
             ,feisarDiffuse :: Texture
+            ,asphalt :: Texture
             ,road :: VertexArrayObject}
 
 screenWidth, screenHeight :: Int
@@ -43,7 +44,9 @@ screenWidth, screenHeight :: Int
 loadFrameData :: IO FrameData
 loadFrameData =
   do feisarDiffuse <-
-       textureFromBMP =<< getDataFileName "resources/textures/feisar.bmp"
+       loadTexture =<< getDataFileName "resources/textures/feisar.bmp"
+     asphalt <-
+       loadTexture =<< getDataFileName "resources/textures/UVCheckerMap01-1024.png"
      depthRenderbuffer <- newRenderbuffer GL_DEPTH_COMPONENT32F 1024 1024
      depthTexture <- newTexture2D 1 GL_DEPTH_COMPONENT32F 1024 1024
      ssaoResult <- newTexture2D 1 GL_R32F 1024 1024
@@ -100,14 +103,26 @@ loadFrameData =
 
 generateRoad :: IO VertexArrayObject
 generateRoad =
-  let a = V3 (-30) 0 30
-      b = V3 (-30) 0 (-30)
-      c = V3 30 0 (-30)
-      d = V3 30 0 30
-  in uploadTriangles
-       (divided normal position)
-       (map (zip (repeat (V3 0 1 0)))
-            [[a,c,b],[a,d,c]])
+  let a =
+        Vertex (V3 (-30) 0 30)
+               (V3 0 60 0)
+               (V2 0 10)
+      b =
+        Vertex (V3 (-30)
+                   0
+                   (-30))
+               (V3 0 60 0)
+               (V2 0 0)
+      c =
+        Vertex (V3 30 0 (-30))
+               (V3 0 60 0)
+               (V2 10 0)
+      d =
+        Vertex (V3 30 0 30)
+               (V3 0 60 0)
+               (V2 10 10)
+  in uploadTriangles objVertexAttribs
+                     [[a,c,b],[a,d,c]]
 
 frame :: FrameData -> Float -> IO ()
 frame FrameData{..} t =
@@ -117,9 +132,10 @@ frame FrameData{..} t =
          shipPosition = V3 0 (t - 0.5) 0
          projTransform = perspective 1.047 1 1 100
          viewTransform =
-           lookAt (V3 (sin (t * 0.1) * 15)
-                      15
-                      (cos (t * 0.1) * 15))
+           let r = 7
+           in lookAt (V3 (sin (t * 0.1) * r)
+                      r
+                      (cos (t * 0.1) * r))
                   0
                   (V3 0 1 0)
          drawScene =
@@ -158,7 +174,9 @@ frame FrameData{..} t =
                                ,dcNElements = 3
                                ,dcUniforms = [("basis",basis)]}])
      pass forwardPass
-          (map (\dc -> dc {dcTextures = [ssaoBlurred,feisarDiffuse]}) drawScene)
+          (zipWith (\dc t -> dc {dcTextures = [ssaoBlurred,t]})
+                   drawScene
+                   [feisarDiffuse,asphalt])
   where fullscreen = (0,0,1024,1024)
         depthPass = Pass depthFBO fullscreen
         ssaoPass = Pass ssaoFBO fullscreen

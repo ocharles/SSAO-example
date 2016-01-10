@@ -61,30 +61,68 @@ uploadTexture2D pixels =
                 castPtr)
      pure t
 
-textureFromBMP :: FilePath -> IO Texture
-textureFromBMP filePath =
+loadTexture :: FilePath -> IO Texture
+loadTexture filePath =
   do res <- readImage filePath
-     case res of
-       Left e -> error e
-       Right (ImageRGB8 (Image width height pixels)) ->
-         do t <-
-              newTexture2D 1
-                           GL_SRGB8
-                           (fromIntegral width)
-                           (fromIntegral height)
-            SV.unsafeWith
-              pixels
-              (glTextureSubImage2D (textureName t)
-                                   0
-                                   0
-                                   0
-                                   (fromIntegral width)
-                                   (fromIntegral height)
-                                   GL_RGB
-                                   GL_UNSIGNED_BYTE .
-               castPtr)
-            return t
-       Right _ -> error "Unknown image type"
+     t <-
+       case res of
+         Left e -> error e
+         Right img ->
+           case img of
+             ImageY8 _ -> error "ImageY8"
+             ImageY16 _ -> error "(Image Pixel16)"
+             ImageYF _ -> error "(Image PixelF)"
+             ImageYA8 _ -> error "(Image PixelYA8)"
+             ImageYA16 _ -> error "(Image PixelYA16)"
+             ImageRGB16 _ -> error "(Image PixelRGB16)"
+             ImageRGBF _ -> error "(Image PixelRGBF)"
+             ImageYCbCr8 _ -> error "(Image PixelYCbCr8)"
+             ImageCMYK8 _ -> error "(Image PixelCMYK8)"
+             ImageCMYK16 _ -> error "(Image PixelCMYK16)"
+             ImageRGBA8 (Image width height pixels) ->
+               do t <-
+                    newTexture2D 1
+                                 GL_RGB8
+                                 (fromIntegral width)
+                                 (fromIntegral height)
+                  SV.unsafeWith
+                    pixels
+                    (glTextureSubImage2D (textureName t)
+                                         0
+                                         0
+                                         0
+                                         (fromIntegral width)
+                                         (fromIntegral height)
+                                         GL_RGBA
+                                         GL_UNSIGNED_BYTE .
+                     castPtr)
+                  pure t
+             ImageRGB8 (Image width height pixels) ->
+               do t <-
+                    newTexture2D 1
+                                 GL_RGB8
+                                 (fromIntegral width)
+                                 (fromIntegral height)
+                  SV.unsafeWith
+                    pixels
+                    (glTextureSubImage2D (textureName t)
+                                         0
+                                         0
+                                         0
+                                         (fromIntegral width)
+                                         (fromIntegral height)
+                                         GL_RGB
+                                         GL_UNSIGNED_BYTE .
+                     castPtr)
+                  return t
+     glGenerateTextureMipmap (textureName t)
+     glTextureParameteri (textureName t)
+                         GL_TEXTURE_MIN_FILTER
+                         (fromIntegral GL_LINEAR_MIPMAP_LINEAR)
+     glTextureParameteri (textureName t)
+                         GL_TEXTURE_MAG_FILTER
+                         (fromIntegral GL_LINEAR)
+     pure t
 
 newtype Renderbuffer =
   Renderbuffer {renderbufferName :: GLuint}
