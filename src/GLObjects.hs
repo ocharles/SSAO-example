@@ -320,10 +320,7 @@ loadObj objPath =
                           [map mkVertex [a,b,c],map mkVertex [a,c,d]]
                         faces -> error (show faces)) $
            (fmap Wavefront.elValue (Wavefront.objFaces obj))
-         objVertices =
-           [v | tri <- objTriangles
-              , v <- tri]
-     VertexArrayObject <$> uploadVertices objVertexAttribs objVertices
+     uploadTriangles objVertexAttribs objTriangles
 
 loadVertexFragmentProgram :: FilePath -> FilePath -> IO Program
 loadVertexFragmentProgram vs fs =
@@ -398,10 +395,10 @@ uv =
                ,vertexAttribFormat =
                   [(UV,2,GL_FLOAT,GL_FALSE,0)]}
 
-uploadVertices
+uploadTriangles
   :: Ord v
-  => VertexAttrib v -> [v] -> IO GLuint
-uploadVertices attribs dat =
+  => VertexAttrib v -> [[v]] -> IO VertexArrayObject
+uploadTriangles attribs triangles =
   do let sizeInBytes =
            fromIntegral (vertexAttribSize attribs) * length vertices
      buffer <- mallocBytes sizeInBytes
@@ -448,7 +445,7 @@ uploadVertices attribs dat =
                     ptr
                     GL_STATIC_DRAW)
      glVertexArrayElementBuffer vao ebo
-     pure vbo
+     pure (VertexArrayObject vao)
   where (indices,vertices) =
           let (indices,(_,vertices)) =
                 runState (traverse dedupVertex dat)
@@ -462,7 +459,9 @@ uploadVertices attribs dat =
              case Map.lookup v vertices of
                Just index -> pure index
                Nothing ->
-                 do let i =
-                          fromIntegral (Map.size vertices)
+                 do let i = fromIntegral (Map.size vertices)
                     modify (Map.insert v i *** flip V.snoc v)
                     pure i
+        dat =
+          [v | tri <- triangles
+             , v <- tri]

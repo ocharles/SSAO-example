@@ -4,9 +4,11 @@
 
 module Main where
 
+import Control.Lens.Operators
 import Control.Monad
 import Control.Monad.Trans.State (evalState, state)
 import Data.Foldable
+import Data.Functor.Contravariant.Divisible
 import DebugHook
 import GLObjects
 import Graphics.GL.Core33
@@ -14,6 +16,7 @@ import Linear hiding (basis)
 import Render
 import System.Random (randomR, getStdGen)
 import qualified SDL
+
 import Paths_ssao_example
 
 data FrameData =
@@ -31,7 +34,8 @@ data FrameData =
             ,ssaoResult :: Texture
             ,ssaoBlurFBO2 :: Framebuffer
             ,ssaoBlurredIntermediate :: Texture
-            ,feisarDiffuse :: Texture}
+            ,feisarDiffuse :: Texture
+            ,road :: VertexArrayObject}
 
 screenWidth, screenHeight :: Int
 (screenWidth,screenHeight) = (1024,1024)
@@ -85,55 +89,62 @@ loadFrameData =
        join (loadVertexFragmentProgram <$>
              getDataFileName "resources/shaders/ship_vs.glsl" <*>
              getDataFileName "resources/shaders/ship_fs.glsl")
-     for_ [deferDepth,ssao,ship] $
-       \program ->
-         do setUniform
-              m44
-              program
-              "u_view"
-              (lookAt (V3 0 60 0)
-                      (V3 0 0 0)
-                      (V3 0 0 (-1)) :: M44 Float)
-            setUniform m44
-                       program
-                       "u_proj"
-                       (perspective 1.047 1 0.1 100 :: M44 Float)
-            setUniform m44
-                       program
-                       "u_model"
-                       (scaled (V4 0.1 0.1 0.1 1) :: M44 Float)
      do kernel <- newSamplingKernel
         setUniform v4Array ssao "kernel" kernel
      setUniform textureUnit ssao "rotations" 1
      setUniform textureUnit ship "diffuseMap" 1
      rotationTexture <- newRotations >>= uploadTexture2D
      shipVao <- loadObj =<< getDataFileName "resources/objects/feisar.obj"
+     road <- generateRoad
      return FrameData {..}
+
+generateRoad :: IO VertexArrayObject
+generateRoad =
+  let a = V3 (-30) 0 30
+      b = V3 (-30) 0 (-30)
+      c = V3 30 0 (-30)
+      d = V3 30 0 30
+  in uploadTriangles
+       (divided normal position)
+       (map (zip (repeat (V3 0 1 0)))
+            [[a,c,b],[a,d,c]])
 
 frame :: FrameData -> Float -> IO ()
 frame FrameData{..} t =
   do _ <- SDL.pollEvents
      let modelTransform =
-           m33_to_m44
-             (fromQuaternion
-                (axisAngle (V3 1 0 0)
-                           (t * 2)) !*!
-              fromQuaternion (axisAngle (V3 0 1 0) t)) !*!
-           scaled (V4 0.1 0.1 0.1 1)
-     pass depthPass
-          [DrawCommand {dcVertexArrayObject = shipVao
-                       ,dcProgram = deferDepth
-                       ,dcTextures = []
-                       ,dcModelTransform = modelTransform
-                       ,dcNElements = 5048
-                       ,dcUniforms = []}]
+           scaled (V4 1.0e-2 1.0e-2 1.0e-2 1) & translation .~ shipPosition
+         shipPosition = V3 0 (t - 0.5) 0
+         projTransform = perspective 1.047 1 1 100
+         viewTransform =
+           lookAt (V3 (sin (t * 0.1) * 15)
+                      15
+                      (cos (t * 0.1) * 15))
+                  0
+                  (V3 0 1 0)
+         drawScene =
+           [DrawCommand {dcVertexArrayObject = shipVao
+                        ,dcProgram = ship
+                        ,dcTextures = []
+                        ,dcUniforms = []
+                        ,dcNElements = 5048
+                        ,dcViewTransform = viewTransform
+                        ,dcProjectionTransform = projTransform
+                        ,dcModelTransform = modelTransform}
+           ,DrawCommand {dcVertexArrayObject = road
+                        ,dcProgram = ship
+                        ,dcTextures = []
+                        ,dcUniforms = []
+                        ,dcNElements = 6
+                        ,dcViewTransform = viewTransform
+                        ,dcProjectionTransform = projTransform
+                        ,dcModelTransform = identity}]
+     pass depthPass (map (\dc -> dc {dcProgram = deferDepth}) drawScene)
      pass ssaoPass
-          [DrawCommand {dcVertexArrayObject = shipVao
-                       ,dcProgram = ssao
-                       ,dcTextures = [depthTexture,rotationTexture]
-                       ,dcModelTransform = modelTransform
-                       ,dcNElements = 5048
-                       ,dcUniforms = []}]
+          (map (\dc ->
+                  dc {dcProgram = ssao
+                     ,dcTextures = [depthTexture,rotationTexture]})
+               drawScene)
      for_ [(ssaoBlurPass1,V2 1 0,ssaoResult)
           ,(ssaoBlurPass2,V2 0 1,ssaoBlurredIntermediate)]
           (\(p,basis,source) ->
@@ -142,15 +153,12 @@ frame FrameData{..} t =
                                ,dcProgram = blur
                                ,dcTextures = [source]
                                ,dcModelTransform = identity
+                               ,dcViewTransform = identity
+                               ,dcProjectionTransform = identity
                                ,dcNElements = 3
                                ,dcUniforms = [("basis",basis)]}])
      pass forwardPass
-          [DrawCommand {dcVertexArrayObject = shipVao
-                       ,dcProgram = ship
-                       ,dcTextures = [ssaoBlurred,feisarDiffuse]
-                       ,dcUniforms = []
-                       ,dcNElements = 5048
-                       ,dcModelTransform = modelTransform}]
+          (map (\dc -> dc {dcTextures = [ssaoBlurred,feisarDiffuse]}) drawScene)
   where fullscreen = (0,0,1024,1024)
         depthPass = Pass depthFBO fullscreen
         ssaoPass = Pass ssaoFBO fullscreen

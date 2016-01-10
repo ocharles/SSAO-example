@@ -8,13 +8,13 @@ uniform mat4 u_proj;
 uniform sampler2D u_shadowMap;
 uniform vec4 kernel[16];
 uniform sampler2D rotations;
+uniform vec4 uRadius;
 
 const int KERNEL_SIZE = 16;
 
-uniform vec4 uRadius;
-
 void main() {
-  vec2 texCoord = v_depthCoord.xy;
+  // TODO Hardcoding scaling factor. We really should be able to calculate this in the vertex shader
+  vec2 texCoord = gl_FragCoord.xy * vec2(1/1024.0f);
 
   vec3 origin = v_position.xyz;
 
@@ -30,10 +30,18 @@ void main() {
   float sampleDepth;
   vec4 offset;
 
-  float depthHere = gl_FragCoord.z;
+  // TODO This should not require a texture lookup
+  float depthHere = texture2D(u_shadowMap, texCoord.xy).x;
+  float delta;
+
+  // TODO The units here are arbitrary. Instead, this should correspond to units.
+  // Problem is when we calculate rangeCheck we need to know the world (or view space)
+  // position of origin and the end of our sampling ray's *result*. This will need reconstruction
+  // of position.
+  float r = 0.1f;
 
   for (int i = 0; i < KERNEL_SIZE; i++) {
-    float r = 0.5f;
+    // TODO What is going on with this mod operation?
     vec3 sampleRay = tbn * kernel[int(mod(i,16))].xyz;
     sampleRay = origin + sampleRay * r;
 
