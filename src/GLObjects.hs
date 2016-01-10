@@ -69,7 +69,7 @@ textureFromBMP filePath =
        Right (ImageRGB8 (Image width height pixels)) ->
          do t <-
               newTexture2D 1
-                           GL_RGB8
+                           GL_SRGB8
                            (fromIntegral width)
                            (fromIntegral height)
             SV.unsafeWith
