@@ -82,7 +82,7 @@ loadTexture filePath =
              ImageRGBA8 (Image width height pixels) ->
                do t <-
                     newTexture2D (floor (logBase 2 (fromIntegral (max width height))))
-                                 GL_RGB8
+                                 GL_SRGB8
                                  (fromIntegral width)
                                  (fromIntegral height)
                   SV.unsafeWith
@@ -100,7 +100,7 @@ loadTexture filePath =
              ImageRGB8 (Image width height pixels) ->
                do t <-
                     newTexture2D (floor (logBase 2 (fromIntegral (max width height))))
-                                 GL_RGB8
+                                 GL_SRGB8
                                  (fromIntegral width)
                                  (fromIntegral height)
                   SV.unsafeWith

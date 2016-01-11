@@ -4,6 +4,7 @@
 
 module Main where
 
+import Foreign
 import Control.Lens.Operators
 import Control.Monad
 import Control.Monad.Trans.State (evalState, state)
@@ -195,11 +196,20 @@ main =
                               fromIntegral <$> V2 screenWidth screenHeight
                            ,SDL.windowOpenGL =
                               Just (SDL.defaultOpenGL {SDL.glProfile =
-                                                         SDL.Core SDL.Normal 3 3})}
+                                                         SDL.Core SDL.Normal 3 3
+                                                      ,SDL.glColorPrecision = 8})}
      SDL.glCreateContext win >>= SDL.glMakeCurrent win
      glEnable GL_DEPTH_TEST
      glEnable GL_CULL_FACE
      glEnable GL_FRAMEBUFFER_SRGB
+     alloca (\ptr ->
+               do glGetFramebufferAttachmentParameteriv GL_DRAW_FRAMEBUFFER
+                                                        GL_FRONT_LEFT
+                                                        GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING
+                                                        ptr
+                  colorEncoding <- peek ptr
+                  when (colorEncoding /= fromIntegral GL_SRGB)
+                       (error "Sorry, an sRGB framebuffer could not be allocated"))
      installDebugHook
      frameData <- loadFrameData
      traverse_ (\t ->
